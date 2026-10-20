@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+compilado/
+codigo-fuente/checks.json
+codigo-fuente/PrepareBrand.exe
+codigo-fuente/preview.png
+codigo-fuente/observation-preview.png
+codigo-fuente/context-preview.png

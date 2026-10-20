@@ -1,0 +1,7 @@
+# Logo de Pulso IT
+
+Creado con la herramienta integrada ImageGen, con fondo transparente. Adaptado a ICO de varias resoluciones mediante conversión de formato, conservando el diseño aprobado. Se integra como recurso dentro del ejecutable.
+
+## Prompt utilizado
+
+Design a premium, distinctive application logo symbol for PULSO IT, a portable Windows PC diagnostic toolkit. Create ONE single centered app icon, no presentation sheet and no text or typography. Square canvas. A midnight navy rounded-square tile with generous corner radii, surrounded by genuinely transparent background. Inside the tile, invent a bold clean geometric monogram P whose continuous mint-turquoise stroke becomes a short diagnostic pulse waveform through its center. Strong simple silhouette, balanced optical geometry, recognizable at 24px, few thick shapes, generous negative space. Color palette midnight navy #192B3A, vivid mint #45CBB2 and turquoise #17B6B1 with a very subtle controlled two-tone transition on the symbol. Contemporary professional software identity, confident and sophisticated. Flat vector-like finish with perfectly clean edges. No 3D, no mockup, no device, no scenery, no drop shadow, no glow, no fine circuits, no shield, no padlock, no medical cross, no tiny details. Icon should occupy about 88 percent of canvas width. Output a polished production-ready logo icon with transparency outside the rounded-square tile.

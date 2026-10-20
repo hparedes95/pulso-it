@@ -52,4 +52,3 @@ El muestreador se ejecutó en Windows: se pudieron leer métricas de red y proce
 ![Vista de demostración: datos simulados](vistas-demostracion/Pulso-IT-Vista-previa.png)
 
 Las imágenes incluidas son demostraciones. Consulta la [guía](docs/GUIA.md) para conocer el alcance, la privacidad y las referencias técnicas de cada comprobación.
-
