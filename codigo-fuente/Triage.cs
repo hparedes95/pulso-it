@@ -10,7 +10,7 @@ namespace PulsoIT {
     }
     public static class Triage {
         static bool IsProblem(Finding f){return f.State=="warning"||f.State=="critical";}
-        public static List<Hypothesis> Build(IEnumerable<Finding> source,ObservationSession observation,IncidentContext context,DateTime now){
+        public static List<Hypothesis> Build(IEnumerable<Finding> source,ObservationSession observation,IncidentContext context,DateTime now,int limit=3){
             var findings=source.Where(f=>now>=f.Time&&now-f.Time<TimeSpan.FromMinutes(10)&&f.ScopeKey.StartsWith("local:",StringComparison.Ordinal)&&(f.IncidentKey==""||f.IncidentKey==context.EvidenceKey)).ToList();
             var result=new List<Hypothesis>();
             Action<string,string,string,string,string,int> add=(title,confidence,evidence,missing,next,priority)=>result.Add(new Hypothesis{Title=title,Confidence=confidence,Evidence=evidence,Missing=missing,Next=next,Priority=priority});
@@ -41,7 +41,7 @@ namespace PulsoIT {
             var lowSpace=findings.FirstOrDefault(f=>f.Code=="disk.space"&&IsProblem(f));if(lowSpace!=null)add("Poco espacio disponible en un volumen","Evidencia consistente",lowSpace.Summary,"No demuestra lentitud del almacenamiento ni daño físico. Puede ser secundario al síntoma.","Comprueba si es el volumen del sistema o de la aplicación afectada y revisa su uso antes de eliminar datos.",65);
             var reliability=findings.FirstOrDefault(f=>f.Code=="disk.reliability"&&IsProblem(f));if(reliability!=null)add("El dispositivo comunica contadores de fiabilidad que requieren revisión","Evidencia moderada",reliability.Title+" · "+reliability.Summary,"El proveedor y el modelo condicionan los datos; los errores acumulados pueden ser históricos. No demuestra que explique esta incidencia.","Revisa los valores, la repetición y el estado de las copias con el responsable antes de intervenir sobre el almacenamiento.",reliability.State=="critical"?105:65);
             var threat=findings.FirstOrDefault(f=>f.Code=="security.active"&&f.State=="critical");if(threat!=null)add("Defender comunica amenazas activas","Evidencia consistente",threat.Summary,"La app lee el estado comunicado; no ha ejecutado un análisis ni establecido que explique todos los síntomas.","Traslada la evidencia al responsable de seguridad y sigue el procedimiento corporativo.",110);
-            return result.OrderByDescending(h=>h.Priority).Take(3).ToList();
+            return result.OrderByDescending(h=>h.Priority).Take(limit).ToList();
         }
         public static string Report(IEnumerable<Finding> source,ObservationSession observation,IncidentContext context,DateTime now){
             var all=source.ToList();var hypotheses=Build(all,observation,context,now);var text=new StringBuilder();

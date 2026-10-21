@@ -67,6 +67,33 @@ namespace PulsoIT {
         public void Dispose(){if(query!=IntPtr.Zero){PdhCloseQuery(query);query=IntPtr.Zero;}}
     }
     internal sealed class ProcessPoint {public string Name;public int Id;public long StartTicks;public double Cpu,Memory,Captured;}
+    internal sealed class NativeFallback {
+        [StructLayout(LayoutKind.Sequential)]struct PerformanceInfo {
+            public uint Size;public UIntPtr CommitTotal,CommitLimit,CommitPeak,PhysicalTotal,PhysicalAvailable,SystemCache,KernelTotal,KernelPaged,KernelNonpaged,PageSize;
+            public uint HandleCount,ProcessCount,ThreadCount;
+        }
+        [DllImport("kernel32.dll",SetLastError=true)]static extern bool GetSystemTimes(out long idle,out long kernel,out long user);
+        [DllImport("kernel32.dll")]static extern ushort GetActiveProcessorGroupCount();
+        [DllImport("psapi.dll",SetLastError=true)]static extern bool GetPerformanceInfo(out PerformanceInfo info,uint size);
+        long oldIdle,oldKernel,oldUser;bool hasCpu;
+        public NativeFallback(){hasCpu=GetSystemTimes(out oldIdle,out oldKernel,out oldUser);}
+        internal static double? CpuDelta(long idle0,long kernel0,long user0,long idle1,long kernel1,long user1){
+            if(idle1<idle0||kernel1<kernel0||user1<user0)return null;
+            double elapsed=(double)(kernel1-kernel0)+(user1-user0),idle=idle1-idle0;if(elapsed<=0||idle>elapsed)return null;
+            return Math.Max(0,Math.Min(100,100*(elapsed-idle)/elapsed));
+        }
+        public void Fill(PerformanceSample sample){
+            long idle,kernel,user;bool ok=GetSystemTimes(out idle,out kernel,out user);
+            if(!sample.Get("cpu").HasValue&&ok&&hasCpu&&GetActiveProcessorGroupCount()==1){sample.Metrics["cpu"]=CpuDelta(oldIdle,oldKernel,oldUser,idle,kernel,user);if(sample.Get("cpu").HasValue)sample.Notes.Add("CPU: API nativa GetSystemTimes, usada al faltar el contador PDH.");}
+            else if(!sample.Get("cpu").HasValue&&GetActiveProcessorGroupCount()>1)sample.Notes.Add("CPU sin verificar: la fuente alternativa no cubre todos los grupos de procesadores.");
+            oldIdle=idle;oldKernel=kernel;oldUser=user;hasCpu=ok;
+            if(!sample.Get("commit").HasValue||!sample.Get("available").HasValue){PerformanceInfo info;if(GetPerformanceInfo(out info,(uint)Marshal.SizeOf(typeof(PerformanceInfo)))){
+                double committed=info.CommitTotal.ToUInt64(),limit=info.CommitLimit.ToUInt64(),available=info.PhysicalAvailable.ToUInt64(),total=info.PhysicalTotal.ToUInt64(),page=info.PageSize.ToUInt64();
+                if(!sample.Get("commit").HasValue&&limit>0&&committed<=limit){sample.Metrics["commit"]=100*committed/limit;sample.Notes.Add("Compromiso: API nativa GetPerformanceInfo, usada al faltar el contador PDH.");}
+                if(!sample.Get("available").HasValue&&page>0&&total>0&&available<=total){sample.Metrics["available"]=available*page/1048576.0;sample.Notes.Add("RAM disponible: API nativa GetPerformanceInfo, usada al faltar el contador PDH.");}
+            }}
+        }
+    }
     public static class ObservationCollector {
         static Dictionary<int,ProcessPoint> Processes(Stopwatch watch,out int skipped){
             var result=new Dictionary<int,ProcessPoint>();skipped=0;
@@ -88,10 +115,10 @@ namespace PulsoIT {
             PipeText.Utf8();var serializer=new JavaScriptSerializer{MaxJsonLength=16*1024*1024};var clock=Stopwatch.StartNew();
             if(synthetic){for(int i=1;i<=seconds;i++){Thread.Sleep(100);Console.WriteLine(serializer.Serialize(Synthetic(i)));Console.Out.Flush();}return 0;}
             using(var pdh=new PdhCounters()){
-                int skipped;var before=Processes(clock,out skipped);int netSkipped;var netBefore=Network(out netSkipped);int sequence=1;
+                var fallback=new NativeFallback();int skipped;var before=Processes(clock,out skipped);int netSkipped;var netBefore=Network(out netSkipped);int sequence=1;
                 while(clock.Elapsed.TotalSeconds<seconds){
                     int delay=Math.Max(1,(int)((sequence-clock.Elapsed.TotalSeconds)*1000));Thread.Sleep(delay);sequence=(int)Math.Floor(clock.Elapsed.TotalSeconds)+1;
-                    var sample=new PerformanceSample{Elapsed=clock.Elapsed.TotalSeconds,Metrics=pdh.Read()};sample.Notes.AddRange(pdh.Notes);
+                    var sample=new PerformanceSample{Elapsed=clock.Elapsed.TotalSeconds,Metrics=pdh.Read()};sample.Notes.AddRange(pdh.Notes);fallback.Fill(sample);
                     var after=Processes(clock,out skipped);sample.Processes=ProcessDelta(before,after);before=after;if(skipped>0)sample.Notes.Add("No se pudo leer CPU/inicio de "+skipped+" procesos.");
                     var netAfter=Network(out netSkipped);long errors=0,drops=0;int pairs=0;bool reset=false;
                     foreach(var item in netAfter){long[] old;if(netBefore.TryGetValue(item.Key,out old)){if(item.Value[0]>=old[0]&&item.Value[1]>=old[1]){errors+=item.Value[0]-old[0];drops+=item.Value[1]-old[1];pairs++;}else reset=true;}}

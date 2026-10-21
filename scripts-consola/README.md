@@ -2,7 +2,7 @@
 
 Versión de consola previa a Pulso IT. Cada archivo contiene sus funciones y puede copiarse y ejecutarse por separado en Windows PowerShell 5.1 o PowerShell 7 con los proveedores Windows disponibles. También puede pegarse su código completo. No necesita `lib`, no supone permisos de administrador, no cambia la política de ejecución y muestra los resultados/errores en PowerShell, sin informes.
 
-Estos scripts conservan el diagnóstico anterior a las mejoras de la aplicación 2.0.0. Las hipótesis, gráficas y comparación en memoria pertenecen a la aplicación.
+Estos scripts conservan el diagnóstico anterior a las mejoras de la aplicación 2.1.0. Las hipótesis, gráficas y comparación en memoria pertenecen a la aplicación.
 
 ```powershell
 .\Diagnostico-PC.ps1

@@ -2,16 +2,20 @@
 
 ![Pulso IT](logo/Pulso-IT-Logo.png)
 
-Herramienta portable de diagnóstico de Windows, con doce secciones, consultas de solo lectura y resultados en pantalla. No instala componentes, solicita elevación ni genera informes. Versión actual: **2.0.0**.
+Herramienta portable de diagnóstico de Windows, con doce secciones, consultas de solo lectura y resultados en pantalla. No instala componentes, solicita elevación ni genera informes. Versión actual: **2.1.0**.
 
 ## Descargar
 
-- [Descargar Pulso IT 2.0.0 para Windows x64 (.exe)](https://github.com/hparedes95/pulso-it/raw/refs/heads/main/descargas/Pulso-IT-Portable-v2.0.0.exe)
-- [Paquete ZIP con documentación y fuentes](https://github.com/hparedes95/pulso-it/raw/refs/heads/main/descargas/Pulso-IT-Portable-v2.0.0.zip)
+- [Descargar Pulso IT 2.1.0 para Windows x64 (.exe)](https://github.com/hparedes95/pulso-it/raw/refs/heads/main/descargas/Pulso-IT-Portable-v2.1.0.exe)
+- [Paquete ZIP con documentación y fuentes](https://github.com/hparedes95/pulso-it/raw/refs/heads/main/descargas/Pulso-IT-Portable-v2.1.0.zip)
 - [Guía detallada en español](docs/GUIA.md)
 - [Hashes SHA-256](SHA256SUMS.txt)
 
 El ejecutable es autónomo: basta con copiarlo al PC o a un USB. Requiere Windows 10/11 x64 o Windows Server x64 con escritorio, .NET Framework 4.7.2+ y Windows PowerShell 5.1. No tiene firma digital. Respeta las restricciones corporativas existentes.
+
+## Novedades del diagnóstico explicado
+
+El botón **Diagnóstico completo** revisa las doce secciones y observa 30 segundos de rendimiento. La pestaña **Diagnóstico** presenta una conclusión, agrupa señales relacionadas y propone el siguiente paso. **Qué significa** explica cada hallazgo; **Datos técnicos** conserva la información original. Los registros antiguos se separan de los problemas actuales. Cuando no se detectan incidencias se indica la cobertura y lo que queda sin verificar. Todo se interpreta mediante reglas locales, sin enviar los datos a una IA.
 
 ## Qué incluye
 
@@ -38,6 +42,7 @@ python test_checks.py
 python test_regression.py
 python test_additional.py
 python test_v2_validation.py
+python test_assessment_data.py
 python package.py
 ```
 
@@ -47,7 +52,7 @@ La compilación utiliza el compilador de .NET Framework del sistema, ejecuta las
 
 Pasaron las pruebas internas de interfaz, UTF-8, filtros, cancelación/timeout, hipótesis y comparación; también las pruebas simuladas de las doce secciones, accesos denegados y regresiones. Se realizó inspección visual y comprobación de geometría con escalas simuladas.
 
-El muestreador se ejecutó en Windows: se pudieron leer métricas de red y procesos visibles. Los contadores PDH de CPU/memoria/disco no estaban disponibles en ese entorno y se mostraron sin verificar. No se afirma validación completa de hardware, VPN, Intune, impresoras, servidores o HTTPS real: hace falta un piloto en los equipos de la organización. Los valores ausentes no se convierten en cero; los umbrales son orientativos.
+El muestreador se ejecutó en Windows: se pudieron leer métricas de red y procesos visibles. Los contadores PDH no estaban disponibles; la alternativa nativa permitió leer CPU y memoria. Paginación y disco permanecieron sin verificar. No se afirma validación completa de hardware, VPN, Intune, impresoras, servidores o HTTPS real: hace falta un piloto en los equipos de la organización. Los valores ausentes no se convierten en cero; los umbrales son orientativos.
 
 ![Vista de demostración: datos simulados](vistas-demostracion/Pulso-IT-Vista-previa.png)
 

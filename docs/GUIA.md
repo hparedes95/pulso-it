@@ -1,24 +1,36 @@
-# Pulso IT 2.0.0 · Diagnóstico portable
+# Pulso IT 2.1.0 · Diagnóstico portable
 
 ## Abrir
 
-Abre `Pulso-IT-Portable-v2.0.0.exe`. Puedes copiar únicamente ese archivo a un USB: incluye las consultas, las ventanas y el logo. No instala servicios, no solicita elevación, no descarga módulos y no guarda informes, resultados, ajustes ni referencias. Todo el diagnóstico permanece en memoria hasta cerrar. Las consultas empiezan al pulsar un botón.
+Abre `Pulso-IT-Portable-v2.1.0.exe`. Puedes copiar únicamente ese archivo a un USB: incluye las consultas, las ventanas y el logo. No instala servicios, no solicita elevación, no descarga módulos y no guarda informes, resultados, ajustes ni referencias. Todo el diagnóstico permanece en memoria hasta cerrar. Las consultas empiezan al pulsar un botón.
 
 Necesita Windows 10/11 x64 o Windows Server x64 con escritorio, .NET Framework 4.7.2 o posterior y Windows PowerShell 5.1. Utiliza los componentes de Windows ya instalados. Si la organización bloquea el ejecutable o PowerShell, sigue su procedimiento autorizado: Pulso IT no modifica políticas, firewall, WinRM ni permisos. El ejecutable no tiene firma digital.
 
 ## Recorrido recomendado
 
 1. Abre **Contexto de incidencia** y concreta el síntoma, a quién afecta, el momento y los cambios conocidos. Las respuestas son contexto aportado por el técnico, no pruebas de causalidad.
-2. Pulsa **Diagnóstico rápido**, **Analizar síntoma** o consulta una sección. Los resultados aparecen progresivamente. Cada sección tiene un límite de 90 segundos; **Detener** conserva lo ya obtenido y marca la consulta incompleta.
+2. Pulsa **Diagnóstico completo** para revisar las doce secciones y observar 30 segundos de rendimiento. Mientras mide puedes reproducir la tarea que falla. Si has indicado una incidencia pasada, se omite la observación automática porque no reconstruye ese momento. **Diagnóstico rápido**, **Analizar síntoma** y la consulta de una sección conservan su alcance acotado. Los resultados aparecen progresivamente. Cada sección tiene un límite de 90 segundos; **Detener** conserva lo ya obtenido y marca la consulta incompleta.
 3. Si el problema ocurre ahora, pulsa **Observar 30 s** o **Observar 60 s** y reproduce el fallo. Puedes detener y conservar el intervalo parcial.
-4. Lee **Interpretación**: muestra hasta tres hipótesis ordenadas, sus evidencias, la confirmación que falta y el siguiente paso de revisión. Si faltan pruebas, no inventa una causa.
+4. Lee **Diagnóstico**: muestra la conclusión principal, los hallazgos agrupados, sus evidencias y los siguientes pasos. Si faltan pruebas, no inventa una causa. Abre un resultado con doble clic para leer **Qué significa**; **Datos técnicos** conserva los registros originales.
 5. Para contrastar cambios, pulsa **Guardar referencia**, repite las consultas u observación y pulsa **Comparar**. La referencia solo vive en memoria y se reemplaza al guardar otra.
 
-## Qué añade esta versión
+## Conclusión automática de la versión 2.1
+
+La pantalla prioriza el diagnóstico explicado. Las reglas se ejecutan localmente, sin IA en la nube. Cada grupo indica conclusión, solidez de la evidencia, posible impacto, siguiente paso y cómo confirmarlo. No se inicia ninguna reparación. Los registros de proveedores se tratan como datos, nunca como instrucciones ejecutables.
+
+Las conclusiones distinguen: diagnóstico en curso; atención prioritaria; hallazgos para revisar; ausencia de incidencias con cobertura incompleta; y ausencia de incidencias detectadas con la cobertura revisada. Para mostrar el estado favorable se necesitan las consultas básicas completas, todas las secciones solicitadas completas, ninguna comprobación sin verificar, ninguna muestra de eventos limitada y una observación completa con al menos diez muestras de CPU, memoria, paginación y disco. La ausencia de avisos se refiere al alcance consultado: nunca certifica que un PC no pueda tener otro fallo.
+
+Se agrupan, entre otros, error de parada con apagado no limpio próximo, WHEA del mismo episodio, memoria/paginación y disco en las mismas muestras, latencia de disco con eventos próximos, DNS y TCP del mismo nombre, estado de servicios con eventos del nombre exacto, y señales de impresión/RDP local. La medición agregada de disco no prueba que un evento corresponda a la misma unidad. El estado RDP local no explica por sí solo un acceso a un servidor remoto.
+
+Los eventos sin regla específica se explican como registros pendientes de interpretación; no se atribuye una causa solo por su identificador. El historial permanece visible. Las copias, el portal Intune, el inicio de sesión y el funcionamiento completo de las aplicaciones siguen fuera de la cobertura local.
+
+## Funciones de diagnóstico
 
 ### Observación del rendimiento
 
 Gráficas de CPU, porcentaje de memoria comprometida, RAM disponible, páginas escritas a paginación, latencia de lectura/escritura del disco y nuevos errores/descartes de las interfaces IPv4 activas. El detalle añade cola y actividad del disco y procesos visibles con CPU y memoria residente. No realiza pruebas de estrés.
+
+Cuando faltan los contadores PDH, se intenta obtener CPU con GetSystemTimes y compromiso/RAM disponible con GetPerformanceInfo. La fuente alternativa se indica en la observación. No se utiliza como CPU total en equipos con varios grupos de procesadores; esas series permanecen pendientes si no hay otra fuente.
 
 El muestreo previsto es aproximadamente una vez por segundo; la disponibilidad y velocidad de los proveedores pueden reducir la cobertura. Los huecos significan datos sin verificar. La CPU por proceso se calcula entre lecturas, se normaliza por procesadores lógicos visibles y distingue reutilizaciones de PID. Los procesos protegidos pueden quedar fuera. Los contadores agregados de disco no identifican por sí solos una unidad o aplicación responsable.
 
@@ -28,7 +40,7 @@ Las hipótesis de CPU requieren al menos diez muestras y un uso de al menos el 9
 
 Se correlacionan, cuando existen, rendimiento sostenido, APIPA en enlaces activos, DNS/TCP del mismo destino, TLS, errores de aplicaciones, colas de impresión, espacio, fiabilidad de discos y amenazas activas. Se separa la evidencia de la posible explicación. Un evento 41 indica apagado no limpio y no prueba una fuente de alimentación averiada.
 
-Para una incidencia pasada se consulta una ventana alrededor de la fecha elegida, con margen de 5 a 120 minutos a cada lado. Para una incidencia actual se mantienen las ventanas de 2 horas, 24 horas, 3 o 7 días. Las mediciones actuales no reconstruyen el rendimiento pasado. Las hipótesis excluyen resultados de más de diez minutos, de otro contexto temporal o de servidores remotos cuando se analiza el PC local.
+Para una incidencia pasada se consulta una ventana alrededor de la fecha elegida, con margen de 5 a 120 minutos a cada lado. Para una incidencia actual se mantienen las ventanas de 2 horas, 24 horas, 3 o 7 días. Las mediciones actuales no reconstruyen el rendimiento pasado. La conclusión excluye resultados consultados hace más de diez minutos, de otro equipo o de otro contexto temporal. En modo actual, los eventos de hace más de una hora se presentan como antecedentes. Si ocurrió entonces el síntoma, debes elegir esa hora en Contexto de incidencia. Las correlaciones entre eventos usan fechas de registro a no más de cinco minutos; es una heurística y no demuestra causalidad.
 
 ### Resultados y comparación
 
@@ -51,7 +63,7 @@ En **Red** o **Escritorio remoto**, indica un destino y puerto y consulta esa se
 | PC y rendimiento | Sistema/hardware, arranque, RAM, paginación, CPU breve, procesos, dispositivos con error, indicadores parciales de reinicio y actualizaciones QFE. |
 | Red | Interfaces/IP/DHCP, APIPA activa, rutas, DNS, perfil, contadores, proxy y pruebas opcionales del destino. |
 | Escritorio remoto | Configuración RDP/NLA, servicio, puerto y escucha local; TCP remoto opcional. |
-| Errores de Windows | Muestra limitada de errores/críticos de System/Application, agrupación por proveedor e ID y metadatos de Minidump. |
+| Errores de Windows | Muestra limitada de errores/críticos de System/Application, agrupación por proveedor e ID, metadatos de Minidump y hasta 40 advertencias específicas de System: almacenamiento, WHEA y DNS, sin desplazar a los errores/críticos. |
 | Seguridad y Defender | Estado, modo, firmas, productos registrados cuando procede y amenazas ya notificadas como activas; no inicia análisis. |
 | Discos | Espacio, salud, fiabilidad disponible, volúmenes y marca dirty; no repara ni realiza pruebas físicas. |
 | VPN | Cliente integrado, adaptadores/rutas, RasMan, sufijos DNS y eventos RasClient; no conecta VPN. |
@@ -75,11 +87,11 @@ No hay telemetría de la aplicación ni envío de diagnósticos a un servicio ex
 
 Se compila como un único ejecutable PE x64. Las pruebas internas comprueban navegación, filtros, texto UTF-8, consultas extensas, cancelación/timeout y conservación de resultados parciales. La geometría de la ventana principal se comprueba con tamaños normal/mínimo y escalas simuladas del 100%, 125%, 150% y 200%; esto no sustituye un piloto con distintos monitores reales.
 
-Las doce secciones se prueban con proveedores simulados, datos incompletos y accesos denegados. Se valida la sintaxis de PowerShell 5.1 y se auditan los comandos de consulta. Hay regresiones para CPU, memoria, discos, servicios, RDP, APIPA, tareas, impresión, conexión TCP y limpieza de sesiones remotas. Las pruebas de la versión 2 cubren hipótesis, datos ausentes/antiguos, separación de destinos/contextos, comparación, reutilización de PID, estados HTTP, transporte y cancelación de la observación.
+Las doce secciones se prueban con proveedores simulados, datos incompletos y accesos denegados. Se valida la sintaxis de PowerShell 5.1 y se auditan los comandos de consulta. Hay regresiones para CPU, memoria, discos, servicios, RDP, APIPA, tareas, impresión, conexión TCP y limpieza de sesiones remotas. La versión 2.1 añade escenarios de conclusión normal, cobertura parcial, fallos de permisos, registros antiguos/futuros, colisiones de ID/proveedor, coincidencia temporal, DNS/TCP contradictorios, servicio exacto, impresión agrupada y un recorrido completo de interfaz con proveedores simulados. Las pruebas de la versión 2 cubren hipótesis, datos ausentes/antiguos, separación de destinos/contextos, comparación, reutilización de PID, estados HTTP, transporte y cancelación de la observación.
 
 Se ejecuta además el muestreador nativo en este entorno Windows: devuelve métricas de red y procesos visibles; los contadores PDH de CPU/memoria/disco no están disponibles aquí (error 0xC0000BC8, lectura de nombres de contadores). Se muestran como sin verificar. No se ha verificado una conexión HTTPS real desde este entorno restringido. Las consultas locales previas también encontraron restricciones CIM y de sockets. No se afirma validación completa del hardware: queda pendiente el piloto en equipos de la organización con impresoras, VPN, Intune, servidores y contadores disponibles.
 
-El ZIP incluye fuentes y pruebas. Para compilar desde `codigo-fuente`, con Python 3 instalado, ejecuta `python build.py`; se crea `compilado` en el directorio superior. Ejecuta `python test_checks.py`, `python test_regression.py` y `python test_additional.py` para las consultas simuladas. `test_v2_validation.py` utiliza el ejecutable recién compilado para pruebas estructuradas y muestreo local. La compilación ejecuta las pruebas internas y genera vistas con datos simulados. Esas imágenes son herramientas de desarrollo explícitas; la aplicación de diagnóstico normal no las genera.
+El ZIP incluye fuentes y pruebas. Para compilar desde `codigo-fuente`, con Python 3 instalado, ejecuta `python build.py`; se crea `compilado` en el directorio superior. Ejecuta `python test_checks.py`, `python test_regression.py` y `python test_additional.py` para las consultas simuladas. `test_v2_validation.py` utiliza el ejecutable recién compilado para pruebas estructuradas y muestreo local. `python test_assessment_data.py` comprueba las fechas, sujetos XML, lectura de advertencias y separación de aplicaciones/servicios para las conclusiones. La compilación ejecuta las pruebas internas y genera vistas con datos simulados. Esas imágenes son herramientas de desarrollo explícitas; la aplicación de diagnóstico normal no las genera.
 
 ## Referencias técnicas
 
@@ -89,3 +101,7 @@ El ZIP incluye fuentes y pruebas. Para compilar desde `codigo-fuente`, con Pytho
 - [Contadores de fiabilidad de almacenamiento](https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-storagereliabilitycounter): significado de desgaste, temperatura y errores comunicados.
 - [Evento 41](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart): apagado no limpio y necesidad de investigar otras evidencias.
 - [Estados del programador de tareas](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-error-and-success-constants) y [códigos del sistema](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1000-1299-): evitan considerar todo código distinto de cero una avería.
+
+- [GetSystemTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getsystemtimes) y [GetPerformanceInfo](https://learn.microsoft.com/en-us/windows/win32/api/psapi/nf-psapi-getperformanceinfo): fuentes alternativas de CPU y memoria.
+- [Errores de almacenamiento](https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors): eventos de reintento, espera y estructura.
+- [Reinicios y errores de parada](https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-unexpected-reboots-system-event-logs) y [WHEA](https://learn.microsoft.com/en-us/windows-hardware/drivers/whea/error-processing): distinción entre registro de apagado, parada y hardware corregido/no corregido.

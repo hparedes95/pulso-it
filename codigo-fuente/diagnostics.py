@@ -66,11 +66,30 @@ function Tcp($hostName,$portNumber,$label) {
  elseif($probe.Status -eq 'blocked'){Row 'unknown' $label 'El contexto local no tiene permiso para abrir el socket.' $probe.Message 'La política local o el producto de seguridad pueden bloquear la prueba. No se puede concluir que el destino esté caído.' 'network.tcp' @{Status='blocked';Target=$hostName;Port=$portNumber;Identity=($hostName+':'+$portNumber)}}
  else{Row 'warning' $label ($hostName+':'+$portNumber+' no accesible o sin respuesta.') $probe.Message 'Revisa nombre/IP, puerto correcto, escucha, ruta y firewall. Un rechazo o timeout no identifica el extremo que falla ni demuestra que el equipo esté apagado.' 'network.tcp' @{Status=$probe.Status;Target=$hostName;Port=$portNumber;Identity=($hostName+':'+$portNumber)}}
 }
+function EventSubject($event) {
+ try {
+  if(-not $event.PSObject.Methods['ToXml']){return ''}
+  [xml]$xml=$event.ToXml();$fields=@{}
+  foreach($entry in @($xml.Event.EventData.Data)){if($entry.Name){$fields[[string]$entry.Name]=[string]$entry.'#text'}}
+  $names=if($event.ProviderName -eq 'Service Control Manager'){@('ServiceName','param1')}elseif($event.ProviderName -in @('Application Error','Application Hang')){@('AppName','ApplicationName','FaultingApplicationName','param1')}else{@('DeviceName','DiskNumber')}
+  foreach($name in $names){if($fields.ContainsKey($name) -and $fields[$name]){$v=$fields[$name] -replace '[\x00-\x1F\x7F]',' ';return $v.Substring(0,[math]::Min(120,$v.Length))}}
+ }catch{} # El mensaje y el resto de la consulta siguen disponibles si falta XML.
+ return ''
+}
 function GroupEvents($log,$max=80) {
- $events=@(Events $log $max)
- if(-not $events.Count){Row 'good' ('Eventos · '+$log) ('Sin errores/críticos visibles entre '+(WindowText)+'.') 'Solo niveles 1 y 2; no incluye Security ni todas las advertencias.' 'Una consulta vacía no certifica la salud del equipo.';return}
- Row 'info' ('Cobertura · '+$log) ($events.Count.ToString()+' eventos leídos · '+(WindowText)+' · máximo '+$max) 'Los recuentos por grupo corresponden a esta muestra de eventos más recientes.' 'Si se alcanza el máximo, puede haber eventos anteriores que no se han leído. Ajusta la ventana para acotar la incidencia.'
- foreach($group in @($events | Group-Object ProviderName,Id)){
+ $events=@(Events $log $max);$regularCount=$events.Count;$warningLimited=$false
+ # Lectura separada y acotada: los avisos repetitivos no desplazan a los errores/críticos.
+ if($log -eq 'System'){
+  try{
+   $warnings=@(Get-WinEvent -FilterHashtable @{LogName=$log;StartTime=$Desde;EndTime=$Hasta;Level=3;ProviderName=@('disk','Microsoft-Windows-Disk','storahci','stornvme','storport','Microsoft-Windows-StorPort','Microsoft-Windows-WHEA-Logger','Microsoft-Windows-DNS-Client');Id=@(51,129,153,17,19,1014)} -MaxEvents 40 -ErrorAction Stop)
+   $warningLimited=$warnings.Count -ge 40
+   $warnings=@($warnings|Where-Object {($_.ProviderName -in @('disk','Microsoft-Windows-Disk') -and $_.Id -in @(51,153)) -or ($_.ProviderName -in @('storahci','stornvme','storport','Microsoft-Windows-StorPort') -and $_.Id -eq 129) -or ($_.ProviderName -eq 'Microsoft-Windows-WHEA-Logger' -and $_.Id -in @(17,19)) -or ($_.ProviderName -eq 'Microsoft-Windows-DNS-Client' -and $_.Id -eq 1014)})
+   $events+= $warnings
+  }catch{if($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*'){Row 'unknown' 'Advertencias relevantes de System' 'No se completó la lectura adicional de advertencias.' $_.Exception.Message 'Los errores/críticos obtenidos se conservan; no se afirma cobertura de advertencias.'}}
+ }
+ if(-not $events.Count){Row 'good' ('Eventos · '+$log) ('Sin errores/críticos visibles entre '+(WindowText)+'.') 'Errores/críticos y, en System, una muestra adicional de avisos concretos de almacenamiento, WHEA y DNS. No incluye Security ni todas las advertencias.' 'Una consulta vacía no certifica la salud del equipo.';return}
+ Row 'info' ('Cobertura · '+$log) ($events.Count.ToString()+' eventos leídos · '+(WindowText)+' · máximo '+$max+' errores/críticos y hasta 40 avisos específicos de System') 'Los recuentos por grupo corresponden a esta muestra de eventos más recientes.' 'Si se alcanza el máximo, puede haber eventos anteriores que no se han leído. Ajusta la ventana para acotar la incidencia.' 'event.coverage' @{Identity=$log;Limited=($regularCount -ge $max -or $warningLimited);Count=$events.Count}
+ foreach($group in @($events | Group-Object -Property { $key=([string]$_.ProviderName)+'|'+$_.Id;if($_.ProviderName -in @('Application Error','Application Hang','Service Control Manager')){$key+='|'+(EventSubject $_)};$key })){
   $last=$group.Group | Sort-Object TimeCreated -Descending | Select-Object -First 1
   $advice='Relaciona la fecha y el mensaje con el síntoma. El evento por sí solo no identifica la causa.'
   if($last.ProviderName -eq 'Microsoft-Windows-Kernel-Power' -and $last.Id -eq 41){$advice='Windows registró un apagado no limpio. No demuestra una fuente de alimentación averiada. Correlaciona con BugCheck, volcado y contexto del apagado.'}
@@ -79,7 +98,7 @@ function GroupEvents($log,$max=80) {
   elseif($last.ProviderName -match 'WHEA-Logger'){$advice='El proveedor ha registrado un error de hardware. Revisa los detalles y la repetición; no identifica por sí solo una pieza que deba sustituirse.'}
   elseif($last.ProviderName -match 'disk|Ntfs|storahci|stornvme|storport'){$advice='Correlaciona con el disco/volumen afectado, los contadores de almacenamiento y los tiempos de respuesta. No ejecutes reparaciones antes de valorar los datos.'}
   $evidence=Details ($group.Group | Sort-Object TimeCreated -Descending | Select-Object -First 3 TimeCreated,Id,LevelDisplayName,ProviderName,Message)
-  Row 'warning' ($last.ProviderName+' · ID '+$last.Id) ($group.Count.ToString()+' repeticiones en la muestra · última '+$last.TimeCreated.ToString('g')) $evidence $advice 'event.group' @{Identity=($log+'|'+$last.ProviderName+'|'+$last.Id);Provider=[string]$last.ProviderName;Id=$last.Id;LastSeenUtc=$last.TimeCreated.ToUniversalTime().ToString('o');Occurrences=$group.Count;WindowStartUtc=$Desde.ToUniversalTime().ToString('o');WindowEndUtc=$Hasta.ToUniversalTime().ToString('o');Limited=($events.Count -ge $max)}
+  Row 'warning' ($last.ProviderName+' · ID '+$last.Id) ($group.Count.ToString()+' repeticiones en la muestra · última '+$last.TimeCreated.ToString('g')) $evidence $advice 'event.group' @{Identity=($log+'|'+$last.ProviderName+'|'+$last.Id+'|'+(EventSubject $last));Log=$log;Level=$last.Level;Subject=(EventSubject $last);TimesUtc=@($group.Group|Sort-Object TimeCreated -Descending|Select-Object -First 20|ForEach-Object {$_.TimeCreated.ToUniversalTime().ToString('o')});Provider=[string]$last.ProviderName;Id=$last.Id;LastSeenUtc=$last.TimeCreated.ToUniversalTime().ToString('o');Occurrences=$group.Count;WindowStartUtc=$Desde.ToUniversalTime().ToString('o');WindowEndUtc=$Hasta.ToUniversalTime().ToString('o');Limited=($regularCount -ge $max -or $warningLimited)}
  }
 }
 
@@ -107,7 +126,7 @@ Check 'CPU con varias muestras' {
  }
  if($samples.Count -ne 3){Row 'unknown' 'Carga de CPU' 'No se obtuvieron las 3 muestras válidas.' (Details $samples) 'No se interpreta una muestra ausente como 0%. El proveedor puede no estar disponible.'}
  else {$avg=[math]::Round(($samples|Measure-Object -Average).Average,1);$high=@($samples|Where-Object {$_ -ge 90}).Count
-  Row $(if($high -eq 3){'warning'}else{'info'}) 'Carga de CPU' ('Media '+$avg+'% · muestras: '+($samples -join ', ')) $source 'Solo se avisa si las 3 muestras llegan al 90%. Es un intervalo corto; repite durante la lentitud y correlaciona con los procesos.'
+  Row $(if($high -eq 3){'warning'}else{'info'}) 'Carga de CPU' ('Media '+$avg+'% · muestras: '+($samples -join ', ')) $source 'Solo se avisa si las 3 muestras llegan al 90%. Es un intervalo corto; repite durante la lentitud y correlaciona con los procesos.' 'cpu.snapshot' @{Average=$avg;Samples=@($samples);HighCount=$high}
  }
 }
 Check 'Procesos por memoria' {
@@ -135,17 +154,17 @@ Check 'Procesos por CPU en intervalo' {
   }
  }catch{$skipped++}}
  if(-not $values.Count){Row 'unknown' 'Procesos por CPU' 'No se pudieron comparar procesos en el intervalo.' ('Lecturas omitidas: '+$skipped) 'Los permisos o procesos que terminan pueden reducir la cobertura.'}
- else{Row 'info' 'Procesos por CPU' ('Top 10 · intervalo '+[math]::Round($seconds,1)+' s · lecturas omitidas '+$skipped) (Details ($values | Sort-Object CPU_Porcentaje -Descending | Select-Object -First 10)) 'Porcentaje normalizado por procesadores lógicos visibles. Se comprueba la hora de inicio para evitar confundir un PID reutilizado. Es orientativo.'}
+ else{Row 'info' 'Procesos por CPU' ('Top 10 · intervalo '+[math]::Round($seconds,1)+' s · lecturas omitidas '+$skipped) (Details ($values | Sort-Object CPU_Porcentaje -Descending | Select-Object -First 10)) 'Porcentaje normalizado por procesadores lógicos visibles. Se comprueba la hora de inicio para evitar confundir un PID reutilizado. Es orientativo.' 'cpu.processes' @{Count=$values.Count}}
 }
 Check 'Dispositivos con incidencias' {
  $d=@(Get-CimInstance Win32_PnPEntity -Filter 'ConfigManagerErrorCode <> 0' -OperationTimeoutSec 8 | Select-Object Name,PNPClass,ConfigManagerErrorCode,Status)
  $bad=@($d|Where-Object {$_.ConfigManagerErrorCode -ne 22})
- Row $(if($bad.Count){'warning'}else{'info'}) 'Estado de dispositivos' ($bad.Count.ToString()+' incidencias · '+@($d|Where-Object ConfigManagerErrorCode -eq 22).Count+' deshabilitados') (Details $d) 'Código 22 significa deshabilitado y puede ser intencionado. Revisa el código en el Administrador de dispositivos; no se cambia ningún controlador.'
+ Row $(if($bad.Count){'warning'}else{'info'}) 'Estado de dispositivos' ($bad.Count.ToString()+' incidencias · '+@($d|Where-Object ConfigManagerErrorCode -eq 22).Count+' deshabilitados') (Details $d) 'Código 22 significa deshabilitado y puede ser intencionado. Revisa el código en el Administrador de dispositivos; no se cambia ningún controlador.' 'device.errors' @{Count=$bad.Count;Disabled=@($d|Where-Object ConfigManagerErrorCode -eq 22).Count}
 }
 Check 'Indicadores de reinicio pendiente' {
  $cbs=Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
  $wu=Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
- Row 'info' 'Indicadores de reinicio' ('CBS: '+$cbs+' · Windows Update: '+$wu) 'Son indicadores parciales del registro, no una orden de reiniciar. No se leen nombres de archivos pendientes.' 'Si coincide con una actualización o instalación incompleta, acuerda el reinicio con el usuario. No se reinicia automáticamente.'
+ Row 'info' 'Indicadores de reinicio' ('CBS: '+$cbs+' · Windows Update: '+$wu) 'Son indicadores parciales del registro, no una orden de reiniciar. No se leen nombres de archivos pendientes.' 'Si coincide con una actualización o instalación incompleta, acuerda el reinicio con el usuario. No se reinicia automáticamente.' 'printer.spooler' @{State=[string]$s.Status}
 }
 Check 'Actualizaciones registradas' {
  $q=@(Get-CimInstance Win32_QuickFixEngineering -OperationTimeoutSec 8 | Sort-Object InstalledOn -Descending | Select-Object -First 10 HotFixID,Description,InstalledOn)
@@ -167,7 +186,7 @@ Check 'Direcciones y APIPA' {
  $apipa=@($ip|Where-Object {$_.IPAddress -like '169.254.*' -and $_.InterfaceIndex -in $script:activeIndexes})
  if($apipa.Count){Row 'warning' 'APIPA en una interfaz activa' 'Hay IPv4 de autoconfiguración en un enlace activo.' (Details ($apipa|Select-Object InterfaceAlias,IPAddress,AddressState)) 'Comprueba DHCP o la red esperada. No se avisa por APIPA en adaptadores desconectados.' 'network.apipa' @{Count=$apipa.Count;Identity='active'}}
  $usable=@($ip|Where-Object {$_.InterfaceIndex -in $script:activeIndexes -and $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -notlike 'fe80:*' -and $_.AddressState -eq 'Preferred'})
- if($script:activeIndexes.Count -and -not $usable.Count){Row 'warning' 'IP utilizable en enlaces activos' 'No se vio una dirección preferida fuera de autoconfiguración/link-local.' '' 'Comprueba DHCP, dirección estática y duplicidades. No se solicita una renovación de IP.'}
+ if($script:activeIndexes.Count -and -not $usable.Count){Row 'warning' 'IP utilizable en enlaces activos' 'No se vio una dirección preferida fuera de autoconfiguración/link-local.' '' 'Comprueba DHCP, dirección estática y duplicidades. No se solicita una renovación de IP.' 'network.address' @{Count=$usable.Count}}
 }
 Check 'Rutas' {
  $r=@(Get-NetRoute)
@@ -178,7 +197,7 @@ Check 'Rutas' {
 Check 'DNS configurado' {
  $d=@(Get-DnsClientServerAddress)
  Row 'info' 'Servidores DNS' 'Configuración por interfaz.' (Details ($d|Select-Object InterfaceAlias,InterfaceIndex,AddressFamily,ServerAddresses)) 'Comprueba los DNS corporativos. Solo se consulta un nombre si indicas un destino.' 'network.dns.config' @{Identity='configured';Addresses=(@($d|Sort-Object InterfaceIndex,AddressFamily|ForEach-Object {($_.InterfaceIndex.ToString())+':'+($_.ServerAddresses -join ',')}) -join ';')}
- if($script:activeIndexes.Count -and -not @($d|Where-Object {$_.InterfaceIndex -in $script:activeIndexes -and $_.ServerAddresses.Count -gt 0}).Count){Row 'warning' 'DNS en enlaces activos' 'No se ven servidores DNS en las interfaces activas.' '' 'Puede afectar al acceso por nombre; no demuestra que falle una conexión por IP.'}
+ if($script:activeIndexes.Count -and -not @($d|Where-Object {$_.InterfaceIndex -in $script:activeIndexes -and $_.ServerAddresses.Count -gt 0}).Count){Row 'warning' 'DNS en enlaces activos' 'No se ven servidores DNS en las interfaces activas.' '' 'Puede afectar al acceso por nombre; no demuestra que falle una conexión por IP.' 'network.dns.missing' @{Count=0}}
 }
 Check 'DHCP y perfil' {
  Row 'info' 'DHCP por interfaz' 'Configuración de DHCP local.' (Details (Get-NetIPInterface | Where-Object InterfaceIndex -in $script:activeIndexes | Select-Object InterfaceAlias,AddressFamily,Dhcp,ConnectionState,InterfaceMetric)) 'DHCP deshabilitado puede indicar una IP estática válida.'
@@ -224,7 +243,7 @@ Check 'Función RDP local' {
  $c=Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections
  if($null -eq $c.fDenyTSConnections){throw 'No se devolvió fDenyTSConnections.'}
  $script:rdpEnabled=$c.fDenyTSConnections -eq 0
- Row 'info' 'Escritorio remoto local' $(if($script:rdpEnabled){'La función está habilitada.'}else{'La función está deshabilitada.'}) ('fDenyTSConnections: '+$c.fDenyTSConnections) 'Tener RDP deshabilitado puede ser la política prevista, no una avería. Windows Home no ofrece el mismo servidor RDP que Pro.'
+ Row 'info' 'Escritorio remoto local' $(if($script:rdpEnabled){'La función está habilitada.'}else{'La función está deshabilitada.'}) ('fDenyTSConnections: '+$c.fDenyTSConnections) 'Tener RDP deshabilitado puede ser la política prevista, no una avería. Windows Home no ofrece el mismo servidor RDP que Pro.' 'rdp.config' @{Enabled=$script:rdpEnabled}
 }
 Check 'Puerto y NLA' {
  $p=Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
@@ -233,9 +252,9 @@ Check 'Puerto y NLA' {
 }
 Check 'Escucha RDP' {
  if($null -eq $script:rdpPort){Row 'unknown' 'Escucha RDP local' 'No se pudo determinar el puerto local.' '' 'No se presupone que sea 3389 si la consulta del registro falló.'}
- else{$l=@(Get-NetTCPConnection -State Listen|Where-Object LocalPort -eq $script:rdpPort);Row $(if($l.Count){'good'}elseif($script:rdpEnabled -eq $true){'warning'}else{'info'}) 'Escucha RDP local' ($l.Count.ToString()+' escuchas en el puerto '+$script:rdpPort) (Details ($l|Select-Object LocalAddress,LocalPort,OwningProcess)) 'La ausencia de escucha solo se avisa si RDP está habilitado. No se valida el firewall efectivo ni UDP.'}
+ else{$l=@(Get-NetTCPConnection -State Listen|Where-Object LocalPort -eq $script:rdpPort);Row $(if($l.Count){'good'}elseif($script:rdpEnabled -eq $true){'warning'}else{'info'}) 'Escucha RDP local' ($l.Count.ToString()+' escuchas en el puerto '+$script:rdpPort) (Details ($l|Select-Object LocalAddress,LocalPort,OwningProcess)) 'La ausencia de escucha solo se avisa si RDP está habilitado. No se valida el firewall efectivo ni UDP.' 'rdp.listen' @{Enabled=$script:rdpEnabled;Count=$l.Count;Port=$script:rdpPort}}
 }
-Check 'Servicio RDP' {$s=OptionalService 'TermService';if($null -eq $s){Row 'info' 'TermService' 'El servicio no está instalado.' '' 'Comprueba la edición de Windows.'}else{Row $(if($script:rdpEnabled -eq $true -and $s.Status -ne 'Running'){'warning'}else{'info'}) 'TermService' ([string]$s.Status) (Details ($s|Select-Object Name,Status,StartType)) 'Se avisa por un servicio detenido solo si la función local está habilitada.'}}
+Check 'Servicio RDP' {$s=OptionalService 'TermService';if($null -eq $s){Row 'info' 'TermService' 'El servicio no está instalado.' '' 'Comprueba la edición de Windows.'}else{Row $(if($script:rdpEnabled -eq $true -and $s.Status -ne 'Running'){'warning'}else{'info'}) 'TermService' ([string]$s.Status) (Details ($s|Select-Object Name,Status,StartType)) 'Se avisa por un servicio detenido solo si la función local está habilitada.' 'rdp.service' @{State=[string]$s.Status;Enabled=$script:rdpEnabled}}}
 if($Destino){Check 'TCP RDP remoto' {Tcp $Destino $Puerto 'Puerto RDP del destino'}}
 
 ''',
@@ -255,11 +274,11 @@ Check 'Microsoft Defender' {
  $s=Get-MpComputerStatus
  if($null -eq $s.AntivirusEnabled -or $null -eq $s.RealTimeProtectionEnabled){Row 'unknown' 'Protección de Defender' 'No se devolvieron los estados de protección.' (Details ($s|Select-Object AMRunningMode,AMServiceEnabled)) 'No se interpretan campos vacíos como protección desactivada.'}
  else{$passive=([string]$s.AMRunningMode -match 'Passive|EDR');$state=if($passive){'info'}elseif(-not $s.AntivirusEnabled -or -not $s.RealTimeProtectionEnabled){'warning'}else{'good'}
-  Row $state 'Protección de Defender' ('Antivirus: '+$s.AntivirusEnabled+' · tiempo real: '+$s.RealTimeProtectionEnabled+' · modo: '+$s.AMRunningMode) (Details ($s|Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,AMRunningMode,QuickScanEndTime,FullScanEndTime)) 'El modo pasivo puede ser intencionado si existe otro producto. No se inicia ningún análisis.'
+  Row $state 'Protección de Defender' ('Antivirus: '+$s.AntivirusEnabled+' · tiempo real: '+$s.RealTimeProtectionEnabled+' · modo: '+$s.AMRunningMode) (Details ($s|Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,AMRunningMode,QuickScanEndTime,FullScanEndTime)) 'El modo pasivo puede ser intencionado si existe otro producto. No se inicia ningún análisis.' 'security.status' @{Mode=[string]$s.AMRunningMode;Antivirus=$s.AntivirusEnabled;RealTime=$s.RealTimeProtectionEnabled}
  }
  $stamp=$s.AntivirusSignatureLastUpdated
  if($null -eq $stamp -or [string]::IsNullOrWhiteSpace([string]$s.AntivirusSignatureVersion)){Row 'unknown' 'Firmas de Defender' 'No se obtuvo fecha o versión de firmas.' '' 'Comprueba el producto de seguridad asignado.'}
- else{$age=((Get-Date)-[datetime]$stamp).TotalHours;$state=if($age -lt -1){'unknown'}elseif($age -gt 48 -and [string]$s.AMRunningMode -notmatch 'Passive|EDR'){'warning'}else{'info'};Row $state 'Firmas de Defender' ('Última actualización: '+$stamp) (Details ($s|Select-Object AntivirusSignatureVersion,AntivirusSignatureLastUpdated,AntivirusSignatureAge)) 'Aviso orientativo tras 48 h; una fecha futura puede indicar reloj incorrecto. No se actualiza automáticamente.'}
+ else{$age=((Get-Date)-[datetime]$stamp).TotalHours;$state=if($age -lt -1){'unknown'}elseif($age -gt 48 -and [string]$s.AMRunningMode -notmatch 'Passive|EDR'){'warning'}else{'info'};Row $state 'Firmas de Defender' ('Última actualización: '+$stamp) (Details ($s|Select-Object AntivirusSignatureVersion,AntivirusSignatureLastUpdated,AntivirusSignatureAge)) 'Aviso orientativo tras 48 h; una fecha futura puede indicar reloj incorrecto. No se actualiza automáticamente.' 'security.signatures' @{AgeHours=$age;Mode=[string]$s.AMRunningMode}}
 }
 Check 'Productos antivirus registrados' {
  $os=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 8
@@ -278,7 +297,7 @@ Check 'Espacio en discos' {$d=@(Get-CimInstance Win32_LogicalDisk -Filter 'Drive
 Check 'Discos físicos' {
  $disks=@(Get-PhysicalDisk)
  if(-not $disks.Count){Row 'unknown' 'Discos físicos' 'El proveedor no devolvió discos.' '' 'No se puede evaluar su estado físico.'}
- foreach($d in $disks){$h=[string]$d.HealthStatus;$state=if($h -eq 'Healthy'){'good'}elseif($h -eq 'Unknown' -or -not $h){'unknown'}else{'warning'};Row $state ('Disco físico · '+$d.FriendlyName) $h (Details ($d|Select-Object FriendlyName,MediaType,HealthStatus,OperationalStatus,Size)) 'Depende del proveedor. No sustituye una prueba física o de superficie.'}
+ foreach($d in $disks){$h=[string]$d.HealthStatus;$state=if($h -eq 'Healthy'){'good'}elseif($h -eq 'Unknown' -or -not $h){'unknown'}else{'warning'};Row $state ('Disco físico · '+$d.FriendlyName) $h (Details ($d|Select-Object FriendlyName,MediaType,HealthStatus,OperationalStatus,Size)) 'Depende del proveedor. No sustituye una prueba física o de superficie.' 'disk.health' @{Identity=[string]$d.FriendlyName;Health=$h}}
 }
 Check 'Fiabilidad del almacenamiento' {
  foreach($disk in @(Get-PhysicalDisk)) {Check ('Fiabilidad · '+$disk.FriendlyName) {
@@ -295,11 +314,11 @@ Check 'Fiabilidad del almacenamiento' {
  }}
 }
 Check 'Volúmenes' {
- foreach($v in @(Get-Volume)){$h=[string]$v.HealthStatus;$state=if($h -and $h -notin @('Healthy','Unknown')){'warning'}elseif($h -eq 'Unknown' -or -not $h){'unknown'}else{'info'};Row $state ('Volumen '+$v.DriveLetter+' '+$v.FileSystemLabel) ('Salud comunicada: '+$h) (Details ($v|Select-Object DriveLetter,FileSystemLabel,FileSystem,HealthStatus,OperationalStatus,Size,SizeRemaining)) 'Un volumen sin letra puede ser de recuperación. No se monta ni se repara.'}
+ foreach($v in @(Get-Volume)){$h=[string]$v.HealthStatus;$state=if($h -and $h -notin @('Healthy','Unknown')){'warning'}elseif($h -eq 'Unknown' -or -not $h){'unknown'}else{'info'};Row $state ('Volumen '+$v.DriveLetter+' '+$v.FileSystemLabel) ('Salud comunicada: '+$h) (Details ($v|Select-Object DriveLetter,FileSystemLabel,FileSystem,HealthStatus,OperationalStatus,Size,SizeRemaining)) 'Un volumen sin letra puede ser de recuperación. No se monta ni se repara.' 'disk.volume' @{Identity=([string]$v.DriveLetter+':'+$v.FileSystemLabel);Health=$h}}
 }
 Check 'Volúmenes marcados dirty' {
  $v=@(Get-CimInstance Win32_Volume -OperationTimeoutSec 8|Where-Object DirtyBitSet -eq $true|Select-Object DriveLetter,Label,FileSystem,DirtyBitSet)
- Row $(if($v.Count){'warning'}else{'info'}) 'Marca dirty del sistema de archivos' ($v.Count.ToString()+' volúmenes con marca activa') (Details $v) 'La marca indica que Windows considera necesaria una comprobación; no confirma por sí sola daño físico. No se ejecuta chkdsk ni reparación.'
+ Row $(if($v.Count){'warning'}else{'info'}) 'Marca dirty del sistema de archivos' ($v.Count.ToString()+' volúmenes con marca activa') (Details $v) 'La marca indica que Windows considera necesaria una comprobación; no confirma por sí sola daño físico. No se ejecuta chkdsk ni reparación.' 'disk.dirty' @{Count=$v.Count}
 }
 
 ''',
@@ -321,7 +340,7 @@ Check 'Rutas y adaptadores de VPN' {
 Check 'Eventos VPN' {
  try {$ev=@(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='RasClient';StartTime=$Desde;EndTime=$Hasta;Level=@(1,2,3)} -MaxEvents 20 -ErrorAction Stop)}
  catch {if($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*'){$ev=@()}else{throw}}
- Row $(if($ev.Count){'warning'}else{'info'}) 'Eventos RasClient' ($ev.Count.ToString()+' eventos en '+$Horas+' h (máximo 20)') (Details ($ev | Select-Object TimeCreated,Id,LevelDisplayName,Message)) 'Solo cubre el cliente VPN integrado. Un evento antiguo no demuestra que la VPN esté fallando ahora.'
+ Row $(if($ev.Count){'warning'}else{'info'}) 'Eventos RasClient' ($ev.Count.ToString()+' eventos entre '+(WindowText)+' (máximo 20)') (Details ($ev | Select-Object TimeCreated,Id,LevelDisplayName,Message)) 'Solo cubre el cliente VPN integrado. Un evento antiguo no demuestra que la VPN esté fallando ahora.' 'vpn.events' @{Count=$ev.Count;TimesUtc=@($ev|ForEach-Object {$_.TimeCreated.ToUniversalTime().ToString('o')});Limited=($ev.Count -ge 20)}
 }
 
 Check 'Servicio de acceso remoto' {$s=OptionalService 'RasMan';Row 'info' 'RasMan' $(if($s){[string]$s.Status}else{'No instalado'}) (Details ($s|Select-Object Name,Status,StartType)) 'Un servicio detenido puede usar inicio bajo demanda y no es necesariamente un error.'}
@@ -348,7 +367,7 @@ Check 'Servicios' {
  else{
   $stopped=@($s|Where-Object {$_.StartMode -eq 'Auto' -and $_.State -ne 'Running'})
   $withErrors=@($stopped|Where-Object {$null -ne $_.ExitCode -and $_.ExitCode -notin @(0,1077)})
-  Row $(if($withErrors.Count){'warning'}else{'info'}) 'Automáticos detenidos' ($stopped.Count.ToString()+' detenidos · '+$withErrors.Count+' con código de error para revisar') (Details $stopped) 'Un servicio automático detenido puede usar inicio diferido o desencadenadores. El código 1077 significa que no se intentó iniciarlo desde el arranque y se muestra como contexto. Correlaciona los demás códigos con Service Control Manager.'
+  Row $(if($withErrors.Count){'warning'}else{'info'}) 'Automáticos detenidos' ($stopped.Count.ToString()+' detenidos · '+$withErrors.Count+' con código de error para revisar') (Details $stopped) 'Un servicio automático detenido puede usar inicio diferido o desencadenadores. El código 1077 significa que no se intentó iniciarlo desde el arranque y se muestra como contexto. Correlaciona los demás códigos con Service Control Manager.' 'service.errors' @{Count=$withErrors.Count;Stopped=$stopped.Count;Names=@($withErrors|ForEach-Object {$_.Name;$_.DisplayName})}
   Row 'info' 'Todos los servicios' ($s.Count.ToString()+' servicios visibles') (Details ($s|Sort-Object Name)) 'No se inician, detienen ni reinician servicios.'
  }
 }
@@ -361,7 +380,7 @@ Check 'Impresoras instaladas' {
  if(-not $p.Count){Row 'info' 'Impresoras' 'No se encontraron impresoras en este contexto.' '' 'Una impresora de otro usuario puede no ser visible para tu cuenta.'}
  foreach($i in $p){
   $e=if([string]$i.PrinterStatus -match 'Error|Offline|PaperOut|PaperJam|DoorOpen|NotAvailable|UserIntervention'){'warning'}else{'info'}
-  Row $e $i.Name ([string]$i.PrinterStatus) (Details ($i | Select-Object Name,DriverName,PortName,PrinterStatus,Shared)) 'El estado depende del controlador y puede estar desactualizado. No se imprime ninguna prueba.'
+  Row $e $i.Name ([string]$i.PrinterStatus) (Details ($i | Select-Object Name,DriverName,PortName,PrinterStatus,Shared)) 'El estado depende del controlador y puede estar desactualizado. No se imprime ninguna prueba.' 'printer.state' @{Identity=[string]$i.Name;State=[string]$i.PrinterStatus}
   Check ('Cola '+$i.Name) {
    $j=@(Get-PrintJob -PrinterName $i.Name | Select-Object ID,PrinterName,JobStatus,SubmittedTime,Size)
    $fallos=@($j | Where-Object { [string]$_.JobStatus -match 'Error|Offline|PaperOut|Blocked|UserIntervention' -or ($null -ne $_.SubmittedTime -and [datetime]$_.SubmittedTime -lt (Get-Date).AddHours(-1)) })
@@ -370,7 +389,7 @@ Check 'Impresoras instaladas' {
  }
 }
 Check 'Puertos de impresión' {Row 'info' 'Puertos' 'Puertos y direcciones de las impresoras.' (Details (Get-PrinterPort | Select-Object Name,PrinterHostAddress,PortNumber)) 'Comprueba si la dirección coincide con la impresora afectada.'}
-Check 'Cola de impresión' {$s=Get-Service Spooler;Row $(if($s.Status -eq 'Running'){'good'}else{'warning'}) 'Spooler' ([string]$s.Status) (Details ($s | Select-Object Name,Status,StartType)) 'Si está detenido, puede afectar a la impresión. No se reinicia automáticamente.'}
+Check 'Cola de impresión' {$s=Get-Service Spooler;Row $(if($s.Status -eq 'Running'){'good'}else{'warning'}) 'Spooler' ([string]$s.Status) (Details ($s | Select-Object Name,Status,StartType)) 'Si está detenido, puede afectar a la impresión. No se reinicia automáticamente.' 'printer.spooler' @{State=[string]$s.Status}}
 
 Check 'Eventos de impresión' {GroupEvents 'Microsoft-Windows-PrintService/Admin' 30}
 
@@ -390,7 +409,7 @@ Check 'Tareas de gestión' {
   $never=$null -eq $i.LastRunTime -or $i.LastRunTime.Year -lt 2000
   $code=$i.LastTaskResult;$normal=@(0,267008,267009,267010,267011,267013)
   $state=if(-not $never -and $null -ne $code -and $code -notin $normal){'warning'}else{'info'}
-  Row $state ('Tarea · '+$t.TaskName) $(if($never){'Sin ejecución anterior válida.'}else{'Última ejecución '+$i.LastRunTime+' · código '+$code}) (Details ($i|Select-Object LastRunTime,LastTaskResult,NextRunTime,NumberOfMissedRuns)) 'No todos los códigos son errores: lista para ejecutar, en curso, deshabilitada o nunca ejecutada son estados del programador. Un resultado antiguo no demuestra un fallo actual.'
+  Row $state ('Tarea · '+$t.TaskName) $(if($never){'Sin ejecución anterior válida.'}else{'Última ejecución '+$i.LastRunTime+' · código '+$code}) (Details ($i|Select-Object LastRunTime,LastTaskResult,NextRunTime,NumberOfMissedRuns)) 'No todos los códigos son errores: lista para ejecutar, en curso, deshabilitada o nunca ejecutada son estados del programador. Un resultado antiguo no demuestra un fallo actual.' 'mdm.task' @{Identity=($t.TaskPath+$t.TaskName);Result=$code;Never=$never;LastRunUtc=$(if(-not $never){$i.LastRunTime.ToUniversalTime().ToString('o')}else{''})}
  }}
 }
 Check 'Eventos MDM' {GroupEvents 'Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin' 40}
